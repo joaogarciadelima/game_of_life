@@ -57,11 +57,30 @@ create policy "profiles_update_self" on profiles
   for update using (auth.uid() = id);
 
 -- Cria perfil automaticamente ao cadastrar
-create or replace function handle_new_user()
-returns trigger language plpgsql security definer as $$
+-- IMPORTANTE: usa `set search_path = public` (security definer roda como
+-- postgres e sem isso não acha `public.profiles` em produção), e envolve
+-- em EXCEPTION para não quebrar o signup caso algo falhe no insert do
+-- profile — é o que gera o erro "Database error saving new user".
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
 begin
-  insert into profiles (id, display_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1)));
+  insert into public.profiles (id, display_name)
+  values (
+    new.id,
+    coalesce(
+      nullif(new.raw_user_meta_data->>'display_name', ''),
+      nullif(new.raw_user_meta_data->>'full_name', ''),
+      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+      'Jogador'
+    )
+  );
+  return new;
+exception when others then
+  raise warning 'handle_new_user failed: %', sqlerrm;
   return new;
 end;
 $$;
@@ -69,7 +88,7 @@ $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
-  for each row execute procedure handle_new_user();
+  for each row execute procedure public.handle_new_user();
 
 -- ========= ROOMS =========
 create table if not exists rooms (
@@ -141,6 +160,39 @@ create policy "events_insert_auth" on game_events
 alter publication supabase_realtime add table rooms;
 alter publication supabase_realtime add table room_players;
 alter publication supabase_realtime add table game_events;
+```
+
+## 4.1. Produção (Vercel / domínio público)
+
+Repita o passo **4** no projeto Supabase de produção e ajuste as URLs:
+
+**Authentication → URL Configuration**:
+- `Site URL` = URL do deploy (ex: `https://jogo-da-vida.vercel.app`)
+- `Redirect URLs` = inclua a mesma URL e quaisquer domínios customizados
+
+**Variáveis de ambiente no Vercel** (Project Settings → Environment Variables):
+- `VITE_SUPABASE_URL` = URL do projeto de produção
+- `VITE_SUPABASE_ANON_KEY` = anon key de produção
+
+Depois de alterar variáveis, dispare um **redeploy** (as `VITE_*` são embutidas no bundle em build time).
+
+### Troubleshooting: "Database error saving new user"
+
+Erro gerado pelo trigger `handle_new_user`. As causas usuais são:
+
+1. **`search_path` vazio** em função `security definer` → não encontra `public.profiles`. **Fix**: reexecute o bloco do passo 4 (a versão aqui já inclui `set search_path = public`).
+2. **`display_name` NULL** (violação de NOT NULL) quando o signup não tem email nem metadata. **Fix**: o `coalesce` na função agora cai em `'Jogador'` como último recurso.
+3. **Tabela `profiles` não existe** no banco de produção (schema foi executado só em dev). **Fix**: rode o SQL completo do passo 4 no projeto de produção.
+
+Diagnóstico:
+
+```sql
+-- profiles existe?
+select column_name, is_nullable from information_schema.columns
+where table_schema='public' and table_name='profiles';
+
+-- função atual
+select prosrc from pg_proc where proname = 'handle_new_user';
 ```
 
 ## 5. Testar
