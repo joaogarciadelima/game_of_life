@@ -1,0 +1,475 @@
+/* ===== RESET BÁSICO ===== */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #f1f5f9; }
+button { font-family: inherit; cursor: pointer; border: none; border-radius: 8px; padding: 0.6rem 1rem; font-weight: 600; transition: transform 0.1s, filter 0.2s; }
+button:hover:not(:disabled) { filter: brightness(1.1); }
+button:active:not(:disabled) { transform: scale(0.97); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+input { font-family: inherit; padding: 0.5rem; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #f1f5f9; }
+
+/* ===== SETUP SCREEN ===== */
+.setup {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+.setup h1 { font-size: 2.5rem; margin: 0.5rem 0; }
+.subtitle { color: #94a3b8; margin-bottom: 2rem; }
+.players-setup {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.player-draft {
+  background: #1e293b;
+  border: 3px solid;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.name-input { width: 100%; font-size: 1rem; }
+.gender-toggle { display: flex; gap: 0.5rem; }
+.gender-toggle button { flex: 1; background: #334155; color: #e2e8f0; }
+.gender-toggle button.active { background: #3b82f6; }
+.colors { display: flex; gap: 0.4rem; justify-content: center; }
+.color-dot {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.color-dot.active { border-color: #fff; }
+.remove { background: #7f1d1d; color: #fee2e2; font-size: 0.85rem; }
+.setup-actions { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
+.btn-primary { background: #10b981; color: white; font-size: 1.1rem; padding: 0.8rem 2rem; }
+.btn-secondary { background: #334155; color: #e2e8f0; }
+
+/* ===== LAYOUT DO JOGO ===== */
+.game-layout { min-height: 100vh; display: flex; flex-direction: column; }
+.game-header {
+  background: #1e293b;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 2px solid #334155;
+}
+.game-header h1 { margin: 0; font-size: 1.4rem; }
+.game-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+}
+.side { display: flex; flex-direction: column; gap: 1rem; overflow: auto; }
+
+/* ===== BOARD ===== */
+.board {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 1rem;
+  overflow: auto;
+}
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+.space {
+  color: #1f2937;
+  border-radius: 8px;
+  padding: 0.5rem;
+  min-height: 90px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  border: 2px solid transparent;
+}
+.space.red { color: white; }
+.space-id { font-size: 0.65rem; opacity: 0.7; }
+.space-label { font-weight: 600; line-height: 1.15; }
+.space-amount { font-size: 0.7rem; margin-top: auto; opacity: 0.85; }
+.space-players {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.pin {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+.pin.active {
+  box-shadow: 0 0 0 2px #fbbf24, 0 0 8px #fbbf24;
+}
+
+/* Tipos especiais */
+.space.millionaire, .space.tycoon, .space.judgment-day {
+  color: white;
+  font-weight: 700;
+}
+
+/* ===== PLAYER PANEL ===== */
+.player-panel {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 1rem;
+}
+.player-panel h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+.players-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.player-card {
+  background: #0f172a;
+  border: 2px solid;
+  border-radius: 8px;
+  padding: 0.6rem;
+  opacity: 0.75;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.player-card.current {
+  opacity: 1;
+  transform: scale(1.02);
+  box-shadow: 0 0 0 2px #fbbf24;
+}
+.player-card.bankrupt, .player-card.tycoon, .player-card.millionaire {
+  opacity: 0.55;
+}
+.player-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
+.dot { width: 14px; height: 14px; border-radius: 50%; }
+.gender { margin-left: auto; color: #94a3b8; }
+.money { font-size: 1.2rem; font-weight: 700; color: #34d399; }
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+}
+.stats span {
+  background: #334155;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.stats .debt { background: #7f1d1d; }
+
+/* ===== CONTROLS ===== */
+.controls {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.current-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: #0f172a;
+  border-radius: 8px;
+}
+.current-pin {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+}
+.path-choice { display: flex; flex-direction: column; gap: 0.5rem; }
+.path-choice button { background: #3b82f6; color: white; }
+
+.roulette { display: flex; align-items: center; gap: 1rem; }
+.btn-roll {
+  background: #ef4444;
+  color: white;
+  font-size: 1.1rem;
+  padding: 0.8rem 1.5rem;
+  flex: 1;
+}
+.roll-result {
+  font-size: 2rem;
+  font-weight: 700;
+  width: 60px;
+  height: 60px;
+  background: #fbbf24;
+  color: #1f2937;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bank-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.bank-actions button { flex: 1; font-size: 0.85rem; }
+.btn-next { background: #10b981; color: white; }
+
+/* ===== LOG ===== */
+.log-panel {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 1rem;
+  max-height: 300px;
+  overflow: auto;
+}
+.log-panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.log-panel ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+}
+.log-panel li {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #334155;
+}
+
+/* ===== MODAL ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+.modal {
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 100%;
+  border: 2px solid #fbbf24;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+.modal h3 { margin: 0 0 1rem; }
+.modal p { margin: 0.5rem 0; color: #cbd5e1; }
+.modal button {
+  background: #3b82f6;
+  color: white;
+  margin-top: 1rem;
+}
+.row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.row button { flex: 1; }
+.number-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.number-grid button {
+  background: #f59e0b;
+  color: #1f2937;
+  font-size: 1.2rem;
+  padding: 0.8rem;
+}
+.revenge-targets { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+.revenge-target {
+  background: #0f172a;
+  padding: 0.5rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.revenge-target button { background: #ef4444; color: white; font-size: 0.85rem; }
+
+/* ===== LOGIN / LOBBY / ROOM ===== */
+.login, .lobby, .room-view, .game-over {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.login-card, .game-over-card {
+  background: #1e293b;
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+}
+.login h1 { margin: 0.25rem 0; font-size: 2rem; }
+.login .tabs { display: flex; gap: 0.3rem; margin: 1.5rem 0 1rem; }
+.login .tabs button {
+  flex: 1;
+  background: #334155;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+.login .tabs button.active { background: #3b82f6; color: white; }
+.tab-panel { display: flex; flex-direction: column; gap: 0.7rem; }
+.tab-panel input { width: 100%; }
+.btn-google { background: #f1f5f9; color: #1f2937; }
+.btn-link { background: none; color: #60a5fa; font-size: 0.9rem; padding: 0.3rem; }
+.hint { color: #94a3b8; font-size: 0.85rem; text-align: center; }
+.warning { background: #78350f; color: #fed7aa; padding: 0.6rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem; }
+.error { background: #7f1d1d; color: #fecaca; padding: 0.6rem; border-radius: 6px; font-size: 0.85rem; margin-top: 1rem; }
+
+.lobby { flex-direction: column; align-items: stretch; padding: 2rem; max-width: 1000px; margin: 0 auto; }
+.lobby-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+.lobby-header h1 { margin: 0; }
+.lobby-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.choice-card {
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 12px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+}
+.choice-card:hover:not(.disabled) { transform: translateY(-3px); border-color: #3b82f6; }
+.choice-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.choice-card h2 { margin: 0 0 0.5rem; }
+.choice-card p { margin: 0; color: #cbd5e1; font-size: 0.9rem; }
+.lobby-panel {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 420px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: stretch;
+}
+.invite-code {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: 0.4rem;
+  text-align: center;
+  background: #0f172a;
+  padding: 1rem;
+  border-radius: 8px;
+  color: #fbbf24;
+}
+
+.room-view { flex-direction: column; align-items: stretch; max-width: 900px; margin: 0 auto; padding: 2rem; }
+.room-header { display: flex; justify-content: space-between; margin-bottom: 1.5rem; }
+.room-players {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.room-player {
+  background: #1e293b;
+  border: 2px solid;
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+.host-badge { background: #fbbf24; color: #1f2937; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: auto; }
+.ready-badge { font-size: 0.8rem; color: #94a3b8; }
+.room-actions { display: flex; gap: 0.75rem; justify-content: center; }
+
+/* ===== PROFILE BADGE ===== */
+.profile-badge {
+  margin-left: auto;
+  background: #334155;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+.game-header { display: flex; align-items: center; gap: 1rem; }
+
+/* ===== BETTING PANEL ===== */
+.betting-panel, .wealth-panel {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 1rem;
+}
+.betting-panel h3, .wealth-panel h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.bet-row { background: #0f172a; padding: 0.5rem; border-radius: 8px; margin-bottom: 0.3rem; }
+.bet-head { display: flex; align-items: center; gap: 0.5rem; }
+.bet-chip {
+  background: #fbbf24;
+  color: #1f2937;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.bet-remove { background: none; color: #7f1d1d; padding: 0 4px; font-weight: 800; }
+.bet-form { display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap; align-items: center; font-size: 0.8rem; }
+.bet-form input { width: 90px; padding: 0.2rem; }
+.bet-form select { padding: 0.2rem; border-radius: 4px; background: #1e293b; color: #f1f5f9; border: 1px solid #334155; }
+.btn-tiny { padding: 0.25rem 0.5rem; font-size: 0.8rem; background: #3b82f6; color: white; }
+
+/* ===== WEALTH CARDS ===== */
+.wealth-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.wealth-card {
+  background: #0f172a;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.picker-modal { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.picker-modal button { background: #334155; color: white; font-size: 0.85rem; }
+
+/* ===== GAME OVER ===== */
+.game-over-card { max-width: 560px; }
+.winner-banner {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #1f2937;
+  padding: 1.5rem;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  margin: 1rem 0;
+}
+.scoreboard {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.scoreboard th, .scoreboard td {
+  padding: 0.5rem;
+  border-bottom: 1px solid #334155;
+  text-align: left;
+}
+.scoreboard th { color: #94a3b8; font-size: 0.85rem; }
+
+/* ===== NUMBER PICKED ===== */
+.number-grid button.picked {
+  background: #10b981;
+  color: white;
+}
+
+/* ===== LOADING ===== */
+.loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}
+
+/* ===== RESPONSIVO ===== */
+@media (max-width: 900px) {
+  .game-main { grid-template-columns: 1fr; }
+}

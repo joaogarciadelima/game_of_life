@@ -1,0 +1,9 @@
+# Garantia extra: não envia secrets nem builds locais
+.env
+.env.local
+.env.*.local
+node_modules
+dist
+.vercel
+*.log
+.DS_Store
