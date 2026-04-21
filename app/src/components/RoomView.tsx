@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useGame } from '../store/gameStore'
 import { useAuth } from '../store/authStore'
 import { useRoom } from '../store/roomStore'
@@ -8,6 +9,20 @@ export function RoomView() {
   const { profile } = useAuth()
   const { room, players, toggleReady, startGame, leaveRoom } = useRoom()
   const newGame = useGame((s) => s.newGame)
+  const initOnline = useGame((s) => s.initOnline)
+  const leaveOnline = useGame((s) => s.leaveOnline)
+  const online = useGame((s) => s.online)
+
+  // Conecta ao canal de sync assim que sala e perfil estão disponíveis
+  useEffect(() => {
+    if (!room || !profile) return
+    if (online?.roomId === room.id) return
+    initOnline({
+      roomId: room.id,
+      myProfileId: profile.id,
+      hostProfileId: room.hostId,
+    })
+  }, [room, profile, online, initOnline])
 
   if (!room || !profile) return null
 
@@ -17,14 +32,20 @@ export function RoomView() {
 
   const handleStart = () => {
     startGame()
-    // Inicia jogo local com os dados da sala
+    // Host inicia gameStore local; snapshot propagará para guests via Realtime
     newGame(
       players.map((p) => ({
         name: p.displayName,
         gender: p.gender,
         color: p.color,
+        profileId: p.profileId,
       }))
     )
+  }
+
+  const handleLeave = () => {
+    leaveOnline()
+    leaveRoom()
   }
 
   return (
@@ -34,7 +55,7 @@ export function RoomView() {
           <h1>Sala {room.code}</h1>
           <p>{players.length}/{room.maxPlayers} jogadores</p>
         </div>
-        <button className="btn-secondary" onClick={leaveRoom}>
+        <button className="btn-secondary" onClick={handleLeave}>
           Sair da sala
         </button>
       </header>
@@ -76,7 +97,7 @@ export function RoomView() {
       </div>
 
       <p className="hint">
-        (Apenas o host inicia. Modo online completo requer schema em SUPABASE_SETUP.md.)
+        (Apenas o host inicia. Guests recebem o estado do jogo em tempo real.)
       </p>
     </div>
   )

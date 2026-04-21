@@ -31,9 +31,11 @@ export const shuffle = <T>(arr: T[]): T[] => {
 export const createPlayer = (
   name: string,
   gender: Gender,
-  color: string
+  color: string,
+  profileId: string | null = null
 ): Player => ({
   id: uid('p'),
+  profileId,
   name,
   gender,
   color,

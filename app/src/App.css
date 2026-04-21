@@ -291,6 +291,14 @@ input { font-family: inherit; padding: 0.5rem; border-radius: 6px; border: 1px s
   border-radius: 50%;
   border: 2px solid #fff;
 }
+.waiting-chip {
+  margin-left: auto;
+  background: #334155;
+  color: #fbbf24;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
 .path-choice { display: flex; flex-direction: column; gap: 0.5rem; }
 .path-choice button { background: #3b82f6; color: white; }
 

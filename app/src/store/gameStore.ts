@@ -8,7 +8,14 @@ import type {
   InsuranceKind,
   WealthCardKind,
   RouletteBet,
+  OnlineCtx,
 } from '../types/game'
+import {
+  connect as syncConnect,
+  disconnect as syncDisconnect,
+  publishSnapshot,
+  publishIntent,
+} from '../online/gameSync'
 import {
   BOARD,
   BUSINESS_START_ID,
@@ -48,7 +55,15 @@ import {
 
 // ========= AÇÕES DO STORE =========
 interface Actions {
-  newGame: (players: { name: string; gender: Gender; color: string }[]) => void
+  newGame: (
+    players: { name: string; gender: Gender; color: string; profileId?: string | null }[]
+  ) => void
+  /** Configura sincronização online e subscreve ao canal da sala. */
+  initOnline: (ctx: OnlineCtx) => Promise<void>
+  /** Encerra sincronização (sai da sala). */
+  leaveOnline: () => void
+  /** Reseta para tela de lobby (phase='setup') — chamado ao sair da partida. */
+  resetGame: () => void
   choosePath: (playerId: string, path: Path) => void
   rollDice: () => void
   resolveEvent: () => void
@@ -96,6 +111,52 @@ const initialState: GameState = {
   log: [],
   bets: [],
   seed: Date.now(),
+  online: null,
+}
+
+// ========= SYNC ONLINE (helpers internos) =========
+
+/** Flag para não re-publicar snapshot enquanto estamos hidratando do remoto. */
+let _hydrating = false
+/** Último snapshot serializado — evita publishes redundantes. */
+let _lastSnapshotJson: string | null = null
+let _publishTimer: ReturnType<typeof setTimeout> | null = null
+
+const INTENT_ACTIONS = new Set([
+  'choosePath', 'rollDice', 'resolveEvent', 'nextTurn',
+  'buyInsurance', 'skipInsurance', 'buyStocks', 'skipStocks', 'playStocks',
+  'takeLoan', 'repayLoan', 'applyRevenge',
+  'rollWeddingGifts', 'decideJudgmentDay', 'tycoonBet',
+  'chooseBranch',
+  'useShareProfit', 'useShareExpense', 'useExemption',
+  'placeBet', 'removeBet',
+  'luckyDayBet', 'luckyDayKeep',
+])
+
+/** Retorna true se a ação deve ser redirecionada como intent (jogador não é host). */
+function routeAsIntent(state: GameState, action: string, args: unknown[]): boolean {
+  const o = state.online
+  if (!o) return false
+  if (o.myProfileId === o.hostProfileId) return false
+  if (!INTENT_ACTIONS.has(action)) return false
+  publishIntent(o.roomId, action, args, o.myProfileId)
+  return true
+}
+
+/** Seleciona apenas o subset do estado relevante para sincronizar. */
+function snapshotOf(s: GameState): Record<string, unknown> {
+  return {
+    phase: s.phase,
+    players: s.players,
+    currentPlayerIndex: s.currentPlayerIndex,
+    rouletteResult: s.rouletteResult,
+    pendingEvent: s.pendingEvent,
+    bridgeOwnerId: s.bridgeOwnerId,
+    wealthDeck: s.wealthDeck,
+    log: s.log,
+    bets: s.bets,
+    seed: s.seed,
+  }
 }
 
 export const useGame = create<Store>((set, get) => ({
@@ -103,17 +164,62 @@ export const useGame = create<Store>((set, get) => ({
 
   // ========= NOVO JOGO =========
   newGame: (defs) =>
-    set(() => ({
+    set((s) => ({
       ...initialState,
       phase: 'idle',
-      players: defs.map((d) => createPlayer(d.name, d.gender, d.color)),
+      players: defs.map((d) =>
+        createPlayer(d.name, d.gender, d.color, d.profileId ?? null)
+      ),
       wealthDeck: buildWealthDeck(),
       log: ['Jogo iniciado.'],
       seed: Date.now(),
+      online: s.online, // preserva contexto online
     })),
 
+  // ========= ONLINE SYNC =========
+  initOnline: async (ctx) => {
+    set({ online: ctx })
+    await syncConnect(ctx.roomId, {
+      onSnapshot: ({ state, sourceProfileId }) => {
+        // Ignora meus próprios snapshots (eco)
+        if (sourceProfileId === ctx.myProfileId) return
+        _hydrating = true
+        try {
+          useGame.setState({
+            ...(state as Partial<GameState>),
+            spaces: BOARD,
+          })
+        } finally {
+          _hydrating = false
+        }
+      },
+      onIntent: ({ action, args, sourceProfileId }) => {
+        // Só o host executa intents
+        if (ctx.myProfileId !== ctx.hostProfileId) return
+        if (sourceProfileId === ctx.myProfileId) return
+        const store = useGame.getState() as unknown as Record<string, unknown>
+        const fn = store[action]
+        if (typeof fn === 'function') {
+          try {
+            ;(fn as (...a: unknown[]) => unknown)(...(args ?? []))
+          } catch (err) {
+            console.error('Erro aplicando intent remoto', action, err)
+          }
+        }
+      },
+    })
+  },
+
+  leaveOnline: () => {
+    syncDisconnect()
+    set({ online: null })
+  },
+
+  resetGame: () => set({ ...initialState, online: null }),
+
   // ========= ESCOLHA INICIAL DE CAMINHO =========
-  choosePath: (playerId, path) =>
+  choosePath: (playerId, path) => {
+    if (routeAsIntent(get(), 'choosePath', [playerId, path])) return
     set((s) => {
       const players = s.players.map((p) =>
         p.id === playerId
@@ -134,10 +240,12 @@ export const useGame = create<Store>((set, get) => ({
           }.`,
         ],
       }
-    }),
+    })
+  },
 
   // ========= GIRO PRINCIPAL =========
   rollDice: () => {
+    if (routeAsIntent(get(), 'rollDice', [])) return
     const s = get()
     const current = s.players[s.currentPlayerIndex]
     if (current.status !== 'active' || !current.path) return
@@ -244,6 +352,7 @@ export const useGame = create<Store>((set, get) => ({
 
   // ========= RESOLVE EVENTO DO ESPAÇO =========
   resolveEvent: () => {
+    if (routeAsIntent(get(), 'resolveEvent', [])) return
     const s = get()
     const pe = s.pendingEvent
     if (!pe) return
@@ -414,6 +523,7 @@ export const useGame = create<Store>((set, get) => ({
 
   // ========= SEGUROS =========
   buyInsurance: (kind) => {
+    if (routeAsIntent(get(), 'buyInsurance', [kind])) return
     const s = get()
     const pe = s.pendingEvent
     if (!pe) return
@@ -432,9 +542,13 @@ export const useGame = create<Store>((set, get) => ({
       log: [...s.log, `🛡️ ${current.name} comprou seguro de ${kind}.`],
     })
   },
-  skipInsurance: () => set({ pendingEvent: null, phase: 'idle' }),
+  skipInsurance: () => {
+    if (routeAsIntent(get(), 'skipInsurance', [])) return
+    set({ pendingEvent: null, phase: 'idle' })
+  },
 
   buyStocks: () => {
+    if (routeAsIntent(get(), 'buyStocks', [])) return
     const s = get()
     const pe = s.pendingEvent
     if (!pe) return
@@ -453,10 +567,14 @@ export const useGame = create<Store>((set, get) => ({
       log: [...s.log, `📈 ${current.name} comprou 1 ação.`],
     })
   },
-  skipStocks: () => set({ pendingEvent: null, phase: 'idle' }),
+  skipStocks: () => {
+    if (routeAsIntent(get(), 'skipStocks', [])) return
+    set({ pendingEvent: null, phase: 'idle' })
+  },
 
   // ========= BOLSA =========
-  playStocks: () =>
+  playStocks: () => {
+    if (routeAsIntent(get(), 'playStocks', [])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe) return s
@@ -483,10 +601,12 @@ export const useGame = create<Store>((set, get) => ({
         rouletteResult: roll,
         log: [...s.log, msg],
       }
-    }),
+    })
+  },
 
   // ========= EMPRÉSTIMOS =========
-  takeLoan: (units) =>
+  takeLoan: (units) => {
+    if (routeAsIntent(get(), 'takeLoan', [units])) return
     set((s) => {
       const idx = s.currentPlayerIndex
       const c = s.players[idx]
@@ -502,9 +622,11 @@ export const useGame = create<Store>((set, get) => ({
           `🏦 ${c.name} pegou ${units} empréstimo(s) = $${(units * LOAN_UNIT).toLocaleString('pt-BR')}.`,
         ],
       }
-    }),
+    })
+  },
 
-  repayLoan: (units) =>
+  repayLoan: (units) => {
+    if (routeAsIntent(get(), 'repayLoan', [units])) return
     set((s) => {
       const idx = s.currentPlayerIndex
       const c = s.players[idx]
@@ -519,10 +641,12 @@ export const useGame = create<Store>((set, get) => ({
         players: s.players.map((p, i) => (i === idx ? updated : p)),
         log: [...s.log, `🏦 ${c.name} pagou ${u} empréstimo(s).`],
       }
-    }),
+    })
+  },
 
   // ========= VINGANÇA =========
-  applyRevenge: (targetId, mode) =>
+  applyRevenge: (targetId, mode) => {
+    if (routeAsIntent(get(), 'applyRevenge', [targetId, mode])) return
     set((s) => {
       const idx = s.currentPlayerIndex
       const c = s.players[idx]
@@ -547,9 +671,11 @@ export const useGame = create<Store>((set, get) => ({
         log.push(`⚔️ ${c.name} mandou ${target.name} voltar 10 espaços.`)
       }
       return { players, pendingEvent: null, phase: 'idle', log }
-    }),
+    })
+  },
 
-  rollWeddingGifts: () =>
+  rollWeddingGifts: () => {
+    if (routeAsIntent(get(), 'rollWeddingGifts', [])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe) return s
@@ -577,9 +703,11 @@ export const useGame = create<Store>((set, get) => ({
           `🎁 Presentes (roleta ${roll}): ${current.name} ganhou $${total.toLocaleString('pt-BR')}.`,
         ],
       }
-    }),
+    })
+  },
 
-  decideJudgmentDay: (choice) =>
+  decideJudgmentDay: (choice) => {
+    if (routeAsIntent(get(), 'decideJudgmentDay', [choice])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe) return s
@@ -610,9 +738,11 @@ export const useGame = create<Store>((set, get) => ({
         phase: 'resolving',
         log: [...s.log, `⚖️ ${current.name} vai tentar ser MAGNATA!`],
       }
-    }),
+    })
+  },
 
-  tycoonBet: (number) =>
+  tycoonBet: (number) => {
+    if (routeAsIntent(get(), 'tycoonBet', [number])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe || pe.kind !== 'tycoon-bet') return s
@@ -636,13 +766,15 @@ export const useGame = create<Store>((set, get) => ({
         rouletteResult: roll,
         log: [...s.log, `💥 ${c.name} foi à falência. (apostou ${number}, saiu ${roll})`],
       }
-    }),
+    })
+  },
 
   collectToll: () => {
     // noop — pedágio é resolvido automaticamente no movimento
   },
 
-  chooseBranch: (targetSpaceId) =>
+  chooseBranch: (targetSpaceId) => {
+    if (routeAsIntent(get(), 'chooseBranch', [targetSpaceId])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe || pe.kind !== 'branch') return s
@@ -670,10 +802,12 @@ export const useGame = create<Store>((set, get) => ({
         phase: pending ? 'resolving' : 'idle',
         log: [...s.log, `🔀 ${current.name} escolheu seguir para #${targetSpaceId}.`, ...passEvents],
       }
-    }),
+    })
+  },
 
   // ========= CARTÕES DE RIQUEZA =========
-  useShareProfit: (targetId) =>
+  useShareProfit: (targetId) => {
+    if (routeAsIntent(get(), 'useShareProfit', [targetId])) return
     set((s) => {
       const c = s.players[s.currentPlayerIndex]
       const cardIdx = c.wealthCards.findIndex((w) => w.kind === 'share-profit')
@@ -696,9 +830,11 @@ export const useGame = create<Store>((set, get) => ({
         players,
         log: [...s.log, `🎴 ${c.name} usou "Dividindo Lucros" em ${target.name} (+$${transfer.toLocaleString('pt-BR')}).`],
       }
-    }),
+    })
+  },
 
-  useShareExpense: (targetId) =>
+  useShareExpense: (targetId) => {
+    if (routeAsIntent(get(), 'useShareExpense', [targetId])) return
     set((s) => {
       const c = s.players[s.currentPlayerIndex]
       const cardIdx = c.wealthCards.findIndex((w) => w.kind === 'share-expense')
@@ -720,9 +856,11 @@ export const useGame = create<Store>((set, get) => ({
         players,
         log: [...s.log, `🎴 ${c.name} usou "Dividindo Despesa" em ${target.name}.`],
       }
-    }),
+    })
+  },
 
-  useExemption: () =>
+  useExemption: () => {
+    if (routeAsIntent(get(), 'useExemption', [])) return
     set((s) => {
       const c = s.players[s.currentPlayerIndex]
       const cardIdx = c.wealthCards.findIndex((w) => w.kind === 'exemption')
@@ -739,10 +877,12 @@ export const useGame = create<Store>((set, get) => ({
         players,
         log: [...s.log, `🎴 ${c.name} usou "Isenção".`],
       }
-    }),
+    })
+  },
 
   // ========= APOSTAS NA ROLETA =========
-  placeBet: (playerId, number, amount) =>
+  placeBet: (playerId, number, amount) => {
+    if (routeAsIntent(get(), 'placeBet', [playerId, number, amount])) return
     set((s) => {
       const player = s.players.find((p) => p.id === playerId)!
       const limited = Math.min(amount, MAX_ROULETTE_BET, player.money)
@@ -751,13 +891,17 @@ export const useGame = create<Store>((set, get) => ({
       const bets = s.bets.filter((b) => b.playerId !== playerId)
       bets.push({ playerId, number, amount: limited })
       return { bets }
-    }),
+    })
+  },
 
-  removeBet: (playerId) =>
-    set((s) => ({ bets: s.bets.filter((b) => b.playerId !== playerId) })),
+  removeBet: (playerId) => {
+    if (routeAsIntent(get(), 'removeBet', [playerId])) return
+    set((s) => ({ bets: s.bets.filter((b) => b.playerId !== playerId) }))
+  },
 
   // ========= DIA DE SORTE (aposta opcional) =========
-  luckyDayBet: (n1, n2) =>
+  luckyDayBet: (n1, n2) => {
+    if (routeAsIntent(get(), 'luckyDayBet', [n1, n2])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe) return s
@@ -779,9 +923,11 @@ export const useGame = create<Store>((set, get) => ({
             : `🍀 ${c.name} errou no Dia de Sorte (saiu ${roll}).`,
         ],
       }
-    }),
+    })
+  },
 
-  luckyDayKeep: () =>
+  luckyDayKeep: () => {
+    if (routeAsIntent(get(), 'luckyDayKeep', [])) return
     set((s) => {
       const pe = s.pendingEvent
       if (!pe) return s
@@ -794,7 +940,8 @@ export const useGame = create<Store>((set, get) => ({
         phase: 'idle',
         log: [...s.log, `🍀 ${c.name} guardou $${LUCKY_DAY_REWARD.toLocaleString('pt-BR')}.`],
       }
-    }),
+    })
+  },
 
   // ========= FIM DE JOGO =========
   computeFinalScores: () => {
@@ -812,7 +959,8 @@ export const useGame = create<Store>((set, get) => ({
   },
 
   // ========= PRÓXIMO TURNO =========
-  nextTurn: () =>
+  nextTurn: () => {
+    if (routeAsIntent(get(), 'nextTurn', [])) return
     set((s) => {
       // Verifica fim de jogo: todos finalizados?
       const allDone = s.players.every(
@@ -831,8 +979,38 @@ export const useGame = create<Store>((set, get) => ({
         }
       }
       return { phase: 'game-over' as const }
-    }),
+    })
+  },
 }))
+
+// ========= SUBSCRIÇÃO DE SNAPSHOT (host publica mudanças) =========
+useGame.subscribe((state, prev) => {
+  if (_hydrating) return
+  const o = state.online
+  if (!o) return
+  if (o.myProfileId !== o.hostProfileId) return
+  // Só publica se algo relevante mudou
+  if (
+    state.players === prev.players &&
+    state.phase === prev.phase &&
+    state.pendingEvent === prev.pendingEvent &&
+    state.currentPlayerIndex === prev.currentPlayerIndex &&
+    state.rouletteResult === prev.rouletteResult &&
+    state.log === prev.log &&
+    state.bets === prev.bets &&
+    state.bridgeOwnerId === prev.bridgeOwnerId &&
+    state.wealthDeck === prev.wealthDeck
+  ) return
+
+  if (_publishTimer) clearTimeout(_publishTimer)
+  _publishTimer = setTimeout(() => {
+    const snap = snapshotOf(useGame.getState())
+    const json = JSON.stringify(snap)
+    if (json === _lastSnapshotJson) return
+    _lastSnapshotJson = json
+    publishSnapshot(o.roomId, snap, o.myProfileId)
+  }, 60)
+})
 
 // ================ FUNÇÕES AUXILIARES ================
 

@@ -63,6 +63,8 @@ export type PlayerStatus = 'active' | 'bankrupt' | 'millionaire' | 'tycoon'
 
 export interface Player {
   id: string
+  /** Perfil online (null para jogadores locais/convidados). */
+  profileId?: string | null
   name: string
   gender: Gender
   color: string
@@ -126,6 +128,12 @@ export interface RouletteBet {
   amount: number
 }
 
+export interface OnlineCtx {
+  roomId: string
+  myProfileId: string
+  hostProfileId: string
+}
+
 export interface GameState {
   phase: Phase
   players: Player[]
@@ -138,4 +146,6 @@ export interface GameState {
   log: string[]                   // histórico de eventos
   bets: RouletteBet[]             // apostas ativas na roleta atual
   seed: number                    // seed para aleatoriedade determinística (online)
+  /** Contexto online. Null para partidas locais. */
+  online: OnlineCtx | null
 }
