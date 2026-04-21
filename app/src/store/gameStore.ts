@@ -15,6 +15,7 @@ import {
   disconnect as syncDisconnect,
   publishSnapshot,
   publishIntent,
+  fetchLatestSnapshot,
 } from '../online/gameSync'
 import {
   BOARD,
@@ -60,6 +61,8 @@ interface Actions {
   ) => void
   /** Configura sincronização online e subscreve ao canal da sala. */
   initOnline: (ctx: OnlineCtx) => Promise<void>
+  /** Busca e aplica o último snapshot (fallback se o Realtime atrasar). */
+  catchUp: () => Promise<void>
   /** Encerra sincronização (sai da sala). */
   leaveOnline: () => void
   /** Reseta para tela de lobby (phase='setup') — chamado ao sair da partida. */
@@ -213,6 +216,23 @@ export const useGame = create<Store>((set, get) => ({
   leaveOnline: () => {
     syncDisconnect()
     set({ online: null })
+  },
+
+  catchUp: async () => {
+    const o = get().online
+    if (!o) return
+    const snap = await fetchLatestSnapshot(o.roomId)
+    if (!snap) return
+    if (snap.sourceProfileId === o.myProfileId) return
+    _hydrating = true
+    try {
+      useGame.setState({
+        ...(snap.state as Partial<GameState>),
+        spaces: BOARD,
+      })
+    } finally {
+      _hydrating = false
+    }
   },
 
   resetGame: () => set({ ...initialState, online: null }),

@@ -61,6 +61,26 @@ export async function connect(roomId: string, cb: Callbacks): Promise<void> {
   }
 }
 
+/** Busca o último snapshot persistido (fallback se o Realtime falhar). */
+export async function fetchLatestSnapshot(
+  roomId: string
+): Promise<SnapshotPayload | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('game_events')
+    .select('payload')
+    .eq('room_id', roomId)
+    .eq('kind', 'snapshot')
+    .order('seq', { ascending: false })
+    .limit(1)
+  if (error) {
+    console.error('fetchLatestSnapshot failed', error)
+    return null
+  }
+  const row = data?.[0]
+  return row ? (row.payload as SnapshotPayload) : null
+}
+
 export async function publishSnapshot(
   roomId: string,
   state: Record<string, unknown>,

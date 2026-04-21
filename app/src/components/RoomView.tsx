@@ -12,6 +12,8 @@ export function RoomView() {
   const initOnline = useGame((s) => s.initOnline)
   const leaveOnline = useGame((s) => s.leaveOnline)
   const online = useGame((s) => s.online)
+  const phase = useGame((s) => s.phase)
+  const catchUp = useGame((s) => s.catchUp)
 
   // Conecta ao canal de sync assim que sala e perfil estão disponíveis
   useEffect(() => {
@@ -23,6 +25,25 @@ export function RoomView() {
       hostProfileId: room.hostId,
     })
   }, [room, profile, online, initOnline])
+
+  // Fallback: se o host já iniciou mas Realtime atrasou, puxamos o último
+  // snapshot diretamente. Re-tenta enquanto a fase ainda está em 'setup'.
+  useEffect(() => {
+    if (!room || !profile) return
+    if (room.status !== 'playing') return
+    if (phase !== 'setup') return
+    let cancelled = false
+    const tryCatchUp = async () => {
+      if (cancelled) return
+      await catchUp()
+    }
+    tryCatchUp()
+    const interval = setInterval(tryCatchUp, 1500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [room, room?.status, profile, phase, catchUp])
 
   if (!room || !profile) return null
 
